@@ -10,7 +10,7 @@ on:
         default: '22'
     secrets:
       SLACK_WEBHOOK_URL:
-        required: true
+        required: false
     outputs:
       new_release_published:
         description: 'Whether a new release was published'
