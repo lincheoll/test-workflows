@@ -8,11 +8,6 @@ on:
         required: false
         type: string
         default: '3.13'
-      node_version:
-        description: 'Node.js version (for semantic-release)'
-        required: false
-        type: string
-        default: '22'
     secrets:
       SLACK_WEBHOOK_URL:
         required: false
@@ -27,18 +22,22 @@ on:
 jobs:
   release:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
     outputs:
-      new_release_published: ${{ steps.semantic.outputs.new_release_published }}
-      new_release_version: ${{ steps.semantic.outputs.new_release_version }}
+      new_release_published: ${{ steps.release.outputs.released }}
+      new_release_version: ${{ steps.release.outputs.version }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          persist-credentials: false
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Setup Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: ${{ inputs.python_version }}
 
@@ -47,39 +46,26 @@ jobs:
           curl -LsSf https://astral.sh/uv/install.sh | sh
           echo "$HOME/.cargo/bin" >> $GITHUB_PATH
 
-      - name: Install Python dependencies
+      - name: Install dependencies
         run: |
           uv sync
 
-      - name: Setup Node.js (for semantic-release)
-        uses: actions/setup-node@v3
+      - name: Python Semantic Release
+        id: release
+        uses: python-semantic-release/python-semantic-release@v9.17.0
         with:
-          node-version: ${{ inputs.node_version }}
-
-      - name: Install semantic-release dependencies
-        run: |
-          if [ -f "yarn.lock" ]; then
-            yarn install --frozen-lockfile
-          elif [ -f "package-lock.json" ]; then
-            npm ci
-          else
-            npm install
-          fi
-
-      - name: Run semantic-release
-        id: semantic
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npx semantic-release
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          git_committer_name: "github-actions"
+          git_committer_email: "github-actions@github.com"
 
       - name: Send release notification to Slack
-        if: steps.semantic.outputs.new_release_published == 'true'
+        if: steps.release.outputs.released == 'true'
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
           REPO_NAME: ${{ github.event.repository.name }}
-          VERSION: ${{ steps.semantic.outputs.new_release_version }}
+          VERSION: ${{ steps.release.outputs.version }}
           ACTOR: ${{ github.actor }}
-          RELEASE_URL: ${{ github.server_url }}/${{ github.repository }}/releases/tag/v${{ steps.semantic.outputs.new_release_version }}
+          RELEASE_URL: ${{ github.server_url }}/${{ github.repository }}/releases/tag/v${{ steps.release.outputs.version }}
         run: |
           curl -X POST -H 'Content-type: application/json' \
             --data '{"text":"🚀 New Release v'"${VERSION}"' - '"${REPO_NAME}"'","blocks":[{"type":"header","text":{"type":"plain_text","text":"🚀 Release v'"${VERSION}"'","emoji":true}},{"type":"section","fields":[{"type":"mrkdwn","text":"*Repository:*\n'"${REPO_NAME}"'"},{"type":"mrkdwn","text":"*Version:*\n`v'"${VERSION}"'`"},{"type":"mrkdwn","text":"*Type:*\nProduction"},{"type":"mrkdwn","text":"*Triggered by:*\n'"${ACTOR}"'"}]},{"type":"actions","elements":[{"type":"button","text":{"type":"plain_text","text":"View Release","emoji":true},"url":"'"${RELEASE_URL}"'"}]}]}' \
